@@ -265,6 +265,8 @@ jobs:
     needs: build
     if: always() && needs.build.result == 'success' && github.event.inputs.publish == 'true'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - name: 下载所有架构的 fpk 文件
         uses: actions/download-artifact@v7
