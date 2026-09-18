@@ -53,8 +53,6 @@ jobs:
           echo "RELEASE_TITLE=【$TAG 更新】" >> $GITHUB_OUTPUT
 
       - name: 创建/更新 Release 并上传 fpk
-        env:
-          GH_TOKEN: ${{ secrets.BUILDBOT }}
         run: |
           REPO="xulawyer1982/buildbot"
           TAG="${{ steps.tag.outputs.tag }}"
