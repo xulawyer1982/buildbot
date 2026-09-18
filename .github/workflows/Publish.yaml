@@ -8,16 +8,6 @@ on:
         required: true
         type: string
       manifest_version:
-        description: 'manifest 中的版本号（如 1.0.1）'name: Publish (x86/arm/all)
-
-on:
-  workflow_call:
-    inputs:
-      app_name:
-        description: '应用名称（如 Aria2）'
-        required: true
-        type: string
-      manifest_version:
         description: 'manifest 中的版本号（如 1.0.1）'
         required: true
         type: string
@@ -120,70 +110,3 @@ jobs:
           done
 
           echo "发布完成：https://github.com/$REPO/releases/tag/$TAG"
-
-        required: true
-        type: string
-      changelog:
-        description: '更新日志（支持中文）'
-        required: true
-        type: string
-      artifact_pattern:
-        description: '匹配 artifact 的模式（默认 "fpk-*"，匹配所有架构）'
-        required: false
-        type: string
-        default: 'fpk-*'
-      release_tag:
-        description: 'Release 标签（默认自动生成日期）'
-        required: false
-        type: string
-        default: ''
-    secrets:
-      BUILDBOT:
-        description: '用于推送和发布仓库的 GitHub Token'
-        required: true
-
-jobs:
-  publish:
-    runs-on: ubuntu-24.04
-    steps:
-      - name: 下载所有 fpk 文件
-        uses: actions/download-artifact@v7
-        with:
-          pattern: ${{ inputs.artifact_pattern }}
-          merge-multiple: true
-          path: fpk_files
-
-      - name: 生成 Release Tag（如果未指定）
-        id: tag
-        run: |
-          if [ -z "${{ inputs.release_tag }}" ]; then
-            TAG=$(date +'%Y.%-m.%-d')
-          else
-            TAG="${{ inputs.release_tag }}"
-          fi
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "RELEASE_TITLE=【$TAG 更新】" >> $GITHUB_OUTPUT
-
-      - name: 创建/更新 Release 并上传 fpk
-        run: |
-          REPO="xulawyer1982/buildbot"
-          TAG="${{ steps.tag.outputs.tag }}"
-          TITLE="${{ steps.tag.outputs.RELEASE_TITLE }}"
-          APP_NAME="${{ inputs.app_name }}"
-          VERSION="${{ inputs.manifest_version }}"
-          CHANGELOG="${{ inputs.changelog }}"
-          NEW_NOTE="构建 ${APP_NAME} 版本 ${VERSION}。更新日志：${CHANGELOG}"
-
-          if gh release view "$TAG" --repo "$REPO" &>/dev/null; then
-            echo "Release $TAG 已存在，将添加资产并追加描述"
-            CURRENT_BODY=$(gh release view "$TAG" --repo "$REPO" --json body -q .body)
-            [ -n "$CURRENT_BODY" ] && NEW_BODY="${CURRENT_BODY}"$'\n'"$NEW_NOTE" || NEW_BODY="$NEW_NOTE"
-            gh release edit "$TAG" --repo "$REPO" --notes "$NEW_BODY"
-          else
-            gh release create "$TAG" --repo "$REPO" --title "$TITLE" --notes "$NEW_NOTE"
-          fi
-
-          for fpk in fpk_files/*.fpk; do
-            echo "上传 $fpk"
-            gh release upload "$TAG" "$fpk" --repo "$REPO" --clobber
-          done
