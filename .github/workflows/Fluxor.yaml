@@ -53,44 +53,44 @@ jobs:
       - name: 安装依赖（jq、unzip等）
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget curl jq unzip
+          sudo apt-get install -y wget curl jq unzip make
 
       - name: 克隆 fluxor 源码
         run: |
           git clone https://github.com/xulawyer1982/surge.git fluxor-src
           ls -la fluxor-src
 
+      # 修正 1：前端目录已更名为 frontend/，锁文件在 frontend/package-lock.json
       - name: 设置 Node.js 环境
         uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: 'npm'
-          cache-dependency-path: fluxor-src/web/package-lock.json
+          cache-dependency-path: fluxor-src/frontend/package-lock.json
 
+      # 修正 2：backend/go.mod 声明 go 1.27，1.26 不满足
       - name: 设置 Go 环境
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26'
+          go-version: '1.27'
 
-      - name: 修改 package.json 版本号（追加 commit 哈希）
-        run: |
-          cd fluxor-src
-          HASH=$(git rev-parse --short HEAD)
-          VERSION=$(jq -r '.version' web/package.json)
-          NEW_VERSION="${VERSION}~${HASH}"
-          jq --arg new "$NEW_VERSION" '.version = $new' web/package.json > web/package.json.tmp && mv web/package.json.tmp web/package.json
-          echo "新版本号: $NEW_VERSION"
+      # 修正 3：删除原"修改 package.json 版本号"步骤。
+      # 版本号已改由后端编译期注入（-ldflags -X fluxor/internal/buildinfo.Version），
+      # 前端 package.json 的 version 不再参与构建，直接由下方 make V= 传入。
 
-      - name: 构建前端 (web)
-        working-directory: ./fluxor-src/web
-        run: |
-          npm ci
-          npm run build
+      # 修正 4：前端目录 web/ → frontend/
+      - name: 安装前端依赖
+        working-directory: ./fluxor-src/frontend
+        run: npm ci
 
-      - name: 构建 Go 后端（指定 GOARCH）
+      # 修正 5：改用仓库自带 Makefile 统一构建。
+      # 原步骤在仓库根目录 go build 会失败——Go module 在 backend/ 子目录，
+      # 且前端产物需先同步到 backend/dist 供 go:embed 内嵌。
+      - name: 构建前端 + Go 后端（make 一键完成，注入版本号）
         working-directory: ./fluxor-src
         run: |
-          GOOS=linux GOARCH=${{ matrix.goarch }} go build -tags vue -ldflags="-s -w" -o fluxor-${{ matrix.goarch }}
+          make V=${{ steps.set_vars.outputs.manifest_version }} GOOS=linux GOARCH=${{ matrix.goarch }}
+          mv fluxor fluxor-${{ matrix.goarch }}
 
       - name: 检出 buildbot 仓库
         uses: actions/checkout@v6
@@ -226,7 +226,6 @@ jobs:
           fi
           MANIFEST_VERSION="${{ steps.set_vars.outputs.manifest_version }}"
           CHANGELOG="${{ steps.set_vars.outputs.changelog }}"
-          sudo apt-get update && sudo apt-get install -y jq
           ESCAPED_CHANGELOG=$(printf '%s' "$CHANGELOG" | jq -sRr @json)
           sed -i "s/\${VERSION}/$MANIFEST_VERSION/g" "$MANIFEST_PATH"
           sed -i "s/\${CHANGELOG}/$ESCAPED_CHANGELOG/g" "$MANIFEST_PATH"
