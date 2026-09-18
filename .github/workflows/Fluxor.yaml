@@ -12,10 +12,14 @@ on:
         required: true
         type: string
       publish:
-        description: '是否发布到 Fndepot Release'
+        description: '是否发布到 buildbot Release'
         required: false
         type: boolean
         default: true
+
+# 发布 Release 需要写权限；调用可复用工作流时，被调用方声明的权限不能超过调用方授予的范围。
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -60,7 +64,6 @@ jobs:
           git clone https://github.com/xulawyer1982/surge.git fluxor-src
           ls -la fluxor-src
 
-      # 修正 1：前端目录已更名为 frontend/，锁文件在 frontend/package-lock.json
       - name: 设置 Node.js 环境
         uses: actions/setup-node@v5
         with:
@@ -68,24 +71,15 @@ jobs:
           cache: 'npm'
           cache-dependency-path: fluxor-src/frontend/package-lock.json
 
-      # 修正 2：backend/go.mod 声明 go 1.27，1.26 不满足
       - name: 设置 Go 环境
         uses: actions/setup-go@v6
         with:
           go-version: '1.27'
 
-      # 修正 3：删除原"修改 package.json 版本号"步骤。
-      # 版本号已改由后端编译期注入（-ldflags -X fluxor/internal/buildinfo.Version），
-      # 前端 package.json 的 version 不再参与构建，直接由下方 make V= 传入。
-
-      # 修正 4：前端目录 web/ → frontend/
       - name: 安装前端依赖
         working-directory: ./fluxor-src/frontend
         run: npm ci
 
-      # 修正 5：改用仓库自带 Makefile 统一构建。
-      # 原步骤在仓库根目录 go build 会失败——Go module 在 backend/ 子目录，
-      # 且前端产物需先同步到 backend/dist 供 go:embed 内嵌。
       - name: 构建前端 + Go 后端（make 一键完成，注入版本号）
         working-directory: ./fluxor-src
         run: |
@@ -255,14 +249,17 @@ jobs:
           path: build_workspace/*.fpk
           if-no-files-found: error
 
-  # ========== 发布到 Fndepot ==========
+  # ========== 发布到 buildbot Release ==========
   publish:
-    name: 发布到 Fndepot Release
+    name: 发布到 buildbot Release
     needs: build
     if: always() && needs.build.result == 'success' && github.event.inputs.publish == 'true'
+    permissions:
+      contents: write
     uses: ./.github/workflows/Publish.yaml
     with:
       app_name: ${{ needs.build.outputs.app_name }}
       manifest_version: ${{ needs.build.outputs.manifest_version }}
       changelog: ${{ needs.build.outputs.changelog }}
-
+    # 不再传 secrets：Publish.yaml 已改为使用内置 GITHUB_TOKEN，
+    # BUILDBOT 仅作为可选覆盖项（如需跨仓库发布再补 secrets 块）。
