@@ -265,5 +265,4 @@ jobs:
       app_name: ${{ needs.build.outputs.app_name }}
       manifest_version: ${{ needs.build.outputs.manifest_version }}
       changelog: ${{ needs.build.outputs.changelog }}
-    secrets:
-      BUILDBOT: ${{ secrets.BUILDBOT }}
+
