@@ -57,7 +57,7 @@ jobs:
 
       - name: 克隆 fluxor 源码
         run: |
-          git clone https://github.com/shuangji66/fluxor.git fluxor-src
+          git clone https://github.com/xulawyer1982/surge.git fluxor-src
           ls -la fluxor-src
 
       - name: 设置 Node.js 环境
