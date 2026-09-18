@@ -8,7 +8,119 @@ on:
         required: true
         type: string
       manifest_version:
+        description: 'manifest 中的版本号（如 1.0.1）'name: Publish (x86/arm/all)
+
+on:
+  workflow_call:
+    inputs:
+      app_name:
+        description: '应用名称（如 Aria2）'
+        required: true
+        type: string
+      manifest_version:
         description: 'manifest 中的版本号（如 1.0.1）'
+        required: true
+        type: string
+      changelog:
+        description: '更新日志（支持中文）'
+        required: true
+        type: string
+      artifact_pattern:
+        description: '匹配 artifact 的模式（默认 "fpk-*"，匹配所有架构）'
+        required: false
+        type: string
+        default: 'fpk-*'
+      release_tag:
+        description: 'Release 标签（默认自动生成日期）'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      # 改为可选：本仓库内发布 Release 用内置 GITHUB_TOKEN 即可，无需 PAT。
+      # 若日后需要跨仓库发布或触发下游工作流，再在仓库 Secrets 里配置 BUILDBOT，
+      # 该值会被优先使用（见下方 GH_TOKEN 表达式）。
+      BUILDBOT:
+        description: '可选：具备 contents:write 的 PAT。未配置时回退到内置 GITHUB_TOKEN'
+        required: false
+
+# 发布 Release / 上传资产需要 contents: write；不显式声明则可能继承只读默认值，
+# gh release 会以 403 失败。
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: 下载所有 fpk 文件
+        uses: actions/download-artifact@v7
+        with:
+          pattern: ${{ inputs.artifact_pattern }}
+          merge-multiple: true
+          path: fpk_files
+
+      - name: 生成 Release Tag（如果未指定）
+        id: tag
+        env:
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          if [ -z "$INPUT_RELEASE_TAG" ]; then
+            TAG=$(date -u +'%Y.%-m.%-d')
+          else
+            TAG="$INPUT_RELEASE_TAG"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "title=【$TAG 更新】" >> "$GITHUB_OUTPUT"
+
+      - name: 创建/更新 Release 并上传 fpk
+        env:
+          # 优先用自定义 PAT；未配置则自动回退到内置 GITHUB_TOKEN（在同一仓库内足够）
+          GH_TOKEN: ${{ secrets.BUILDBOT || github.token }}
+          REPO: xulawyer1982/buildbot
+          APP_NAME: ${{ inputs.app_name }}
+          VERSION: ${{ inputs.manifest_version }}
+          CHANGELOG: ${{ inputs.changelog }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          TITLE: ${{ steps.tag.outputs.title }}
+        run: |
+          set -euo pipefail
+
+          # 防护：没有 fpk 就不要建空 Release
+          shopt -s nullglob
+          FPK_LIST=(fpk_files/*.fpk)
+          if [ ${#FPK_LIST[@]} -eq 0 ]; then
+            echo "错误：未下载到任何 .fpk 资产，终止发布"
+            ls -la fpk_files || true
+            exit 1
+          fi
+          echo "待上传资产：${FPK_LIST[*]}"
+
+          # 更新日志通过 env 传入，避免含引号/换行/中文时破坏 shell 脚本
+          NEW_NOTE="构建 ${APP_NAME} 版本 ${VERSION}。更新日志：${CHANGELOG}"
+
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，追加描述并覆盖同名资产"
+            CURRENT_BODY=$(gh release view "$TAG" --repo "$REPO" --json body -q .body)
+            if [ -n "$CURRENT_BODY" ]; then
+              NEW_BODY="${CURRENT_BODY}"$'\n'"$NEW_NOTE"
+            else
+              NEW_BODY="$NEW_NOTE"
+            fi
+            gh release edit "$TAG" --repo "$REPO" --notes "$NEW_BODY"
+          else
+            echo "Release $TAG 不存在，新建"
+            gh release create "$TAG" --repo "$REPO" --title "$TITLE" --notes "$NEW_NOTE"
+          fi
+
+          for fpk in "${FPK_LIST[@]}"; do
+            echo "上传 $fpk"
+            gh release upload "$TAG" "$fpk" --repo "$REPO" --clobber
+          done
+
+          echo "发布完成：https://github.com/$REPO/releases/tag/$TAG"
+
         required: true
         type: string
       changelog:
